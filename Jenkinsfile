@@ -1,22 +1,60 @@
 pipeline {
-    agent {
-        label "jenkins-node"
+  agent none
+
+  environment {
+    registry = "index.docker.io/v1/"
+    imageName = "bsjzzz/docker-cicd-tomcat-test"
+  }
+
+  stages {
+    stage('Checkout') {
+      agent any
+      steps {
+        git branch: 'main', url: 'https://github.com/PinkCrow00/cicd0509.git'
+      }
     }
-    stages {
-        stage('Checkout') {
-            steps {
-                git branch: 'main', url: 'https://github.com/PinkCrow00/busan.git'
-            }
+    stage('Build') {
+      agent {
+        docker { image 'maven:3-openjdk-8' }
+      }
+      steps {
+        sh 'mvn -DskipTests=true clean package'
+      }
+    }
+    stage('Test') {
+      agent {
+        docker { image 'maven:3-openjdk-8' }
+      }
+      steps {
+        sh 'mvn test'
+      }
+    }
+    stage('Build Docker Image') {
+        agent any
+        steps {
+            sh 'docker image build -t $imageName:$BUILD_NUMBER .'
         }
-        stage('Build') {
-            steps {
-                sh "mvn -Dmaven.test.failure.ignore=true clean package"
-            }
+    }
+    stage('Tag Docker Image') {
+        agent any
+        steps {
+            sh 'docker image tag $imageName:$BUILD_NUMBER $imageName:latest'
         }
-        stage('Deploy') {
-            steps {
-                deploy adapters: [tomcat9(credentialsId: 'tomcat-manager', path: '', url: 'http://192.168.56.12:8080')], contextPath: null, war: 'target/hello-world.war'
+    }
+    stage('Publish Docker Image') {
+        agent any
+        steps {
+            withDockerRegistry(credentialsId: 'docker-hub-token', url: $registry) {
+              sh 'docker image push $imageName:$BUILD_NUMBER'
+              sh 'docker image push $imageName:latest'
             }
         }
     }
+    stage('Run Docker Container') {
+        agent any
+        steps {
+            sh 'docker -H tcp://192.168.56.10:2375 container run -d --name myweb -p 80:8080 $imageName:$BUILD_NUMBER'
+        }
+    }
+  }
 }
